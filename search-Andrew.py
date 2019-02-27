@@ -8,14 +8,20 @@ from operator import itemgetter
 import sys 
 import os
 import pickle
+import util
 
 ############################################################
 ####################### Set Parameters #####################
 ############################################################
-credentials=sys.argv[1]
-mode = sys.argv[2]
-db=sys.argv[3]
-target = sys.argv[4:]
+args=util.get_args()
+credential=args.credential
+mode = args.mode
+root = args.root
+db= args.db
+maxTweetsPerDay = args.maxTweetsPerDay
+targetfile = args.targetfile
+start_date = datetime.strptime(args.start_date,"%Y-%m-%d") # or you can pick start_date = today
+end_date = start_date+timedelta(days=args.date_delta)
 if not os.path.exists(db):
     os.makedirs('./'+db)
 
@@ -23,38 +29,44 @@ if not os.path.exists(db):
 #mode = 'hashtags'
 #db= 'governmentshutdown'
 #target = ['governmentshutdown','shut down the government','the shutdown','TrumpShutdown', '#shutdown','NoMoreShutdowns']
+assert mode in ['users','hashtags']
 
-"""
-# User Mode
-mode='users'
-db= 'antiTrumpUserTimeline'
+if mode=='users':
+    with open(targetfile, 'rb') as filehandle:  
+        # read the data as binary data stream
+        target = pickle.load(filehandle)
+    log=open("usersScrapingLogs.txt",'w+')
 
-with open('antiTrumpUserList.data', 'rb') as filehandle:  
-    # read the data as binary data stream
-    target = pickle.load(filehandle)
-"""
-    
+if mode=='hashtags':
+    with open(root+'/hashtagsForSearchTweets/'+targetfile,'r') as f:
+        target=f.read().splitlines()
+    log=open("tweetsScrapingLogs.txt",'w+')
+        
 if not os.path.exists(db):
     os.makedirs('./'+db)
 
 conn = sqlite3.connect('./'+db+'/'+db+'.db')
 c = conn.cursor()
 
+log.write('--------------------------------------------\n')
+log.write('--------------------------------------------\n')
+log.write('Job Created {}:\n'.format(datetime.now()))
+if mode=='hashtags':
+    log.write('hashtags：'+','.join(target)+'\n')
+
 
 ############################################################
 ####################### Your credentials ###################
 ############################################################
 
-with open("credential1.txt") as f:
-    lines=f.read().splitlines()
+with open(credential) as f:
+    cred=f.read().splitlines()
 #Jen's API
-APP_KEY='zHwMGTtFTNKS7ANPuWUaL2HHT'
-ACCESS_TOKEN='2610287817-yexyelXsRGO6uNwbEP5Sh8hgR2FvKgELgIqCmaR'
-#APP_KEY = 'fGx0NB83fSPEabC2YD6MvsxY8'
-APP_SECRET = '5GOHB4rr9U3yZ77YmOAcsimLLWVRQAwqTbnWeENxxFC3DblZKe'
+APP_KEY, ACCESS_TOKEN, APP_SECRET, callbackUrl= cred[0],cred[1],cred[2],cred[3]
+if credential=='credential2.txt': callbackUrl='oob'
 
 twitter = Twython(APP_KEY, APP_SECRET)
-auth = twitter.get_authentication_tokens(callback_url='http://ph-education.com/')
+auth = twitter.get_authentication_tokens(callback_url=callbackUrl)
 
 #####################################################################################
 ####################### Will create sqlite tables the first time  ###################
@@ -71,11 +83,13 @@ create_tweet_tables(c,conn)
 
 today=datetime.now()
 today=datetime(today.year,today.month,today.day,0,0,0)
-start_date = datetime(2019,12,1,0,0,0) # or you can pick start_date = today
-end_date = start_date + timedelta(62,0) # or you can pick another end_date 
+
+end_date = start_date + timedelta(1,0) # or you can pick another end_date 
 earliestTweet=0 # or you can pick latest tweet from previous query
 latestTweet=-1
 
+log.write('*db:{}'.format(db))
+log.write('*start date:{},end date:{},earliestTweet:{}\n'.format(start_date, end_date, earliestTweet))
 
 
 
@@ -86,17 +100,18 @@ latestTweet=-1
 exceptionusers=[]
 
 if(mode == 'hashtags'):
-	input_list_of_target_hashtags = target 
-	new_tweets = queryTweetsContainingHashtag(twitter, input_list_of_target_hashtags, start_date, end_date, earliestTweet, latestTweet, maxTweets=60000)
-	print('Done querying tweets')
-	print('Got at most', len(np.unique([i['id'] for i in new_tweets])), ' new tweets')
-	print('Start inserting timelines in database')
-	insertTweets(conn,c, new_tweets)
-	
-	##optional : query user profiles too... takes time
-	print('Now querying profiles of people that posted the tweets')
-	queryAndInsertUsersProfilesThatPostedTheTweets(twitter, c, conn, today, new_tweets)
-	
+    input_list_of_target_hashtags = target 
+    new_tweets = queryTweetsContainingHashtag(twitter, input_list_of_target_hashtags, start_date, end_date, earliestTweet, latestTweet, maxTweets=60000)
+    print('Done querying tweets')
+    print('Got at most', len(np.unique([i['id'] for i in new_tweets])), ' new tweets')
+    print('Start inserting timelines in database')
+    insertTweets(conn,c, new_tweets)
+    log.write("collected {} tweets".format(len(np.unique([i['id'] for i in new_tweets]))))
+    log.write("----------------Querying Completed-------------------\n")
+    ##optional : query user profiles too... takes time
+    print('Now querying profiles of people that posted the tweets')
+    queryAndInsertUsersProfilesThatPostedTheTweets(twitter, c, conn, today, new_tweets)
+    log.write("----------------Insertion Completed-------------------\n")
 
 
 #########################################
@@ -130,6 +145,8 @@ elif(mode == 'users'):
 	# new_users = queryUsersProfiles(twitter, target_users)
 	# print('Start inserting user profiles in database')
 	# insertUserProfiles(c,conn,new_users,today,today)
+log.write('#########Job Completed Successfully##########\n')
+log.close()
 
 
 
