@@ -18,12 +18,18 @@ credential=args.credential
 mode = args.mode
 root = args.root
 db= args.db
+logfilenumber=args.logfilenumber
 maxTweetsPerDay = args.maxTweetsPerDay
 targetfile = args.targetfile
-start_date = datetime.strptime(args.start_date,"%Y-%m-%d") # or you can pick start_date = today
-end_date = start_date+timedelta(days=args.date_delta)
+first_user = args.first_user
+targetfile_type=args.filetype
+if args.start_date!=None:
+    start_date = datetime.strptime(args.start_date,"%Y-%m-%d") # or you can pick start_date = today
+    end_date = start_date+timedelta(days=args.date_delta)
 if not os.path.exists(db):
     os.makedirs('./'+db)
+
+
 
 
 #mode = 'hashtags'
@@ -32,15 +38,26 @@ if not os.path.exists(db):
 assert mode in ['users','hashtags']
 
 if mode=='users':
-    with open(targetfile, 'rb') as filehandle:  
-        # read the data as binary data stream
-        target = pickle.load(filehandle)
-    log=open("usersScrapingLogs.txt",'w+')
+    
+    if targetfile_type=="txt":
+        with open(targetfile, 'r') as f:  
+            # read the data as binary data stream
+            target = f.read().split('\n')
+            print(target)
+    else:
+        with open(targetfile, 'rb') as filehandle:  
+            # read the data as binary data stream
+            target = pickle.load(filehandle)
+            
+    log=open("usersScrapingLogs"+logfilenumber+".txt",'w+')
+
+if first_user!=-1:
+    assert first_user in target
 
 if mode=='hashtags':
     with open(root+'/hashtagsForSearchTweets/'+targetfile,'r') as f:
         target=f.read().splitlines()
-    log=open("tweetsScrapingLogs.txt",'w+')
+    log=open("tweetsScrapingLogs"+logfilenumber+".txt",'w+')
         
 if not os.path.exists(db):
     os.makedirs('./'+db)
@@ -53,7 +70,8 @@ log.write('--------------------------------------------\n')
 log.write('Job Created {}:\n'.format(datetime.now()))
 if mode=='hashtags':
     log.write('hashtags：'+','.join(target)+'\n')
-
+if mode=='users':
+    log.write('users:'+','.join(list(map(str,target)))+'\n')
 
 ############################################################
 ####################### Your credentials ###################
@@ -84,12 +102,12 @@ create_tweet_tables(c,conn)
 today=datetime.now()
 today=datetime(today.year,today.month,today.day,0,0,0)
 
-end_date = start_date + timedelta(1,0) # or you can pick another end_date 
 earliestTweet=0 # or you can pick latest tweet from previous query
 latestTweet=-1
 
 log.write('*db:{}'.format(db))
-log.write('*start date:{},end date:{},earliestTweet:{}\n'.format(start_date, end_date, earliestTweet))
+if mode=='hashtags':
+    log.write('*start date:{},end date:{},earliestTweet:{}\n'.format(start_date, end_date, earliestTweet))
 
 
 
@@ -123,23 +141,40 @@ elif(mode == 'users'):
     user_count=0
     target_users = [int(i) for i in target]
     print('Start querying timelines')
+    first_user_reached=False
+    if first_user==-1: 
+        first_user_reached=True
     for user in target_users:
-        print('Now querying tweets of user ', user)
+        if not first_user_reached:
+            print("not reached our first user yet")
+            if user==first_user:
+                first_user_reached=True
+            continue          
+        
         try:
+            print('Now querying tweets of user ', user)
             current_tweets= queryUserTimeline(twitter,user)
-            new_tweets = new_tweets + current_tweets
+            #new_tweets = new_tweets + current_tweets
             user_count+=1
-            print('Got ', len(np.unique([i['id'] for i in new_tweets])), ' new tweets from user')
+            print('Got ', len(np.unique([i['id'] for i in current_tweets])), ' new tweets from user')
+            log.write('Got '+ str(len(np.unique([i['id'] for i in current_tweets])))+ ' new tweets from user'+'\n')
             print('Done querying user ', user, 'It is our {} user'.format(user_count))
+            log.write('Done querying user '+str(user)+'; It is our {} user'.format(user_count)+'\n')
             print('Start inserting timelines in database')
             insertTweets(conn,c, current_tweets)
-        except:
-               print 'error user is', user
-               exceptionusers.append(user)
+        except Exception as e:
+            print 'error user is', user
+            print e
+            #raise e
+            exceptionusers.append(user)
+        
     print('Done querying timelines')
+    log.write('Done querying timelines')
     
     print('Now querying profiles of people')
+    log.write('Now querying profiles of people')
     queryAndInsertUsersProfiles(twitter, c, conn, today, target_users)
+    
 
 	##few line below do the same but should be slower
 	# new_users = queryUsersProfiles(twitter, target_users)
